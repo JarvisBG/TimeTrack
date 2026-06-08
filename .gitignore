@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+timetrack.db
+
+# Node
+node_modules/
+dist/
+.vite/
+.output/
+
+# Divers
+.DS_Store
