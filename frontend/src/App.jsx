@@ -6,10 +6,12 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
-import Employees from './pages/Employees'; 
+import Employees from './pages/Employees';
+import Scanner from './pages/Scanner';
+import History from './pages/History'; 
 
 // --- Pages Temporaires restantes (que nous allons coder dans les étapes 13 et 14) ---
-const Scanner = () => <div className="bg-white p-10 rounded-xl shadow-sm text-center font-bold text-xl text-gray-600">Scanner QR Code (En construction)</div>;
+
 
 function App() {
   return (
@@ -33,6 +35,7 @@ function App() {
 
             {/* Route pour le scanner de présence */}
             <Route path="/scanner" element={<Layout><Scanner /></Layout>} />
+            <Route path="/history" element={<Layout><History /></Layout>} />
           </Route>
 
           {/* Sécurité si la route n'existe pas */}

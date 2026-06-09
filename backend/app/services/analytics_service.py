@@ -1,120 +1,70 @@
-from datetime import datetime, time, timedelta
+import pandas as pd
+from datetime import date
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
-
 from app.models.models import Employee, Attendance
 
-# --- CONFIGURATION MÉTIER ---
-# Heure de début de journée standard (ex: 08h00)
-STANDARD_START_TIME = time(8, 0)
-# Délai minimum entre une arrivée et un départ pour éviter les doubles scans accidentels (ex: 5 minutes)
-MINIMUM_MINUTES_BETWEEN_SCANS = 5
-
-def calculate_delay(arrivee: time) -> float:
-    """Calcule le retard en heures décimales (ex: 1.5 pour 1h30 de retard)."""
-    dt_start = datetime.combine(datetime.today(), STANDARD_START_TIME)
-    dt_arrivee = datetime.combine(datetime.today(), arrivee)
-    
-    if dt_arrivee > dt_start:
-        delta = dt_arrivee - dt_start
-        return round(delta.total_seconds() / 3600.0, 2)
-    return 0.0
-
-def calculate_work_hours(arrivee: time, depart: time) -> float:
-    """Calcule le temps de travail en heures décimales."""
-    dt_arrivee = datetime.combine(datetime.today(), arrivee)
-    dt_depart = datetime.combine(datetime.today(), depart)
-    
-    if dt_depart > dt_arrivee:
-        delta = dt_depart - dt_arrivee
-        return round(delta.total_seconds() / 3600.0, 2)
-    return 0.0
-
-def process_scan(db: Session, qr_data: str):
+def get_dashboard_stats(db: Session, target_date: date = None):
     """
-    Logique principale exécutée lors du scan d'un QR Code.
-    Détermine s'il s'agit d'une arrivée ou d'un départ.
+    Calcule les KPI du tableau de bord (Taux de présence, retards, etc.) 
+    en utilisant Pandas pour une analyse performante.
     """
-    # 1. Identifier l'employé à partir des données du QR Code
-    employee = db.query(Employee).filter(Employee.qr_code == qr_data).first()
-    if not employee:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="QR Code invalide ou employé introuvable."
-        )
-
-    now = datetime.now()
-    today = now.date()
-    current_time = now.time()
-
-    # 2. Chercher s'il y a déjà un pointage pour cet employé aujourd'hui
-    attendance = db.query(Attendance).filter(
-        Attendance.employee_id == employee.id, 
-        Attendance.date == today
-    ).first()
-
-    # CAS A : Aucun pointage aujourd'hui -> C'est une ARRIVÉE
-    if not attendance:
-        retard_heures = calculate_delay(current_time)
+    if not target_date:
+        target_date = date.today()
         
-        new_attendance = Attendance(
-            employee_id=employee.id,
-            date=today,
-            heure_arrivee=current_time,
-            retard=retard_heures
-        )
-        db.add(new_attendance)
-        db.commit()
-        db.refresh(new_attendance)
-        
+    # 1. Récupérer le nombre total d'employés
+    total_employees = db.query(Employee).count()
+    
+    # Sécurité : si la base est vide
+    if total_employees == 0:
         return {
-            "action": "Arrivée",
-            "employee": f"{employee.prenom} {employee.nom}",
-            "time": current_time.strftime("%H:%M:%S"),
-            "message": "Arrivée enregistrée avec succès."
+            "total_employes": 0, "presents": 0, "absents": 0, 
+            "taux_presence": 0.0, "taux_absence": 0.0, 
+            "taux_retard": 0.0, "moyenne_heures": 0.0
         }
 
-    # CAS B : Un pointage existe, mais pas d'heure de départ -> C'est un DÉPART
-    if attendance.heure_depart is None:
-        # Sécurité anti-doublon (vérifier que l'arrivée ne vient pas tout juste d'avoir lieu)
-        dt_arrivee = datetime.combine(today, attendance.heure_arrivee)
-        if now < dt_arrivee + timedelta(minutes=MINIMUM_MINUTES_BETWEEN_SCANS):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Pointage trop rapproché. Veuillez patienter avant d'enregistrer votre départ."
-            )
-
-        attendance.heure_depart = current_time
-        attendance.heures_travaillees = calculate_work_hours(attendance.heure_arrivee, current_time)
-        
-        db.commit()
-        db.refresh(attendance)
-        
+    # 2. Récupérer les pointages du jour
+    attendances = db.query(Attendance).filter(Attendance.date == target_date).all()
+    
+    # S'il n'y a aucun pointage aujourd'hui
+    if not attendances:
         return {
-            "action": "Départ",
-            "employee": f"{employee.prenom} {employee.nom}",
-            "time": current_time.strftime("%H:%M:%S"),
-            "heures_travaillees": attendance.heures_travaillees,
-            "message": "Départ enregistré avec succès."
+            "total_employes": total_employees, "presents": 0, "absents": total_employees,
+            "taux_presence": 0.0, "taux_absence": 100.0, 
+            "taux_retard": 0.0, "moyenne_heures": 0.0
         }
 
-    # CAS C : L'heure de départ est déjà enregistrée
-    # Si l'employé scanne à nouveau en fin de journée, on met à jour son heure de départ (il est parti plus tard)
-    attendance.heure_depart = current_time
-    attendance.heures_travaillees = calculate_work_hours(attendance.heure_arrivee, current_time)
+    # 3. Conversion des données SQLAlchemy en DataFrame Pandas
+    data = [{
+        "employee_id": a.employee_id,
+        "retard": a.retard,
+        "heures_travaillees": a.heures_travaillees
+    } for a in attendances]
     
-    db.commit()
-    db.refresh(attendance)
+    df = pd.DataFrame(data)
+
+    # 4. Calculs avec Pandas
+    presents = len(df)
+    absents = total_employees - presents
     
+    # Taux globaux
+    taux_presence = (presents / total_employees) * 100
+    taux_absence = (absents / total_employees) * 100
+    
+    # Retards (compter ceux qui ont un retard > 0)
+    retards_count = len(df[df['retard'] > 0])
+    taux_retard = (retards_count / presents) * 100 if presents > 0 else 0.0
+    
+    # Moyenne d'heures travaillées (ignorer ceux qui n'ont pas encore pointé le départ : heures = 0)
+    df_heures_valides = df[df['heures_travaillees'] > 0]
+    moyenne_heures = df_heures_valides['heures_travaillees'].mean() if not df_heures_valides.empty else 0.0
+
+    # 5. Retourner le dictionnaire final formaté
     return {
-        "action": "Mise à jour Départ",
-        "employee": f"{employee.prenom} {employee.nom}",
-        "time": current_time.strftime("%H:%M:%S"),
-        "heures_travaillees": attendance.heures_travaillees,
-        "message": "Heure de départ mise à jour."
+        "total_employes": total_employees,
+        "presents": presents,
+        "absents": absents,
+        "taux_presence": round(taux_presence, 2),
+        "taux_absence": round(taux_absence, 2),
+        "taux_retard": round(taux_retard, 2),
+        "moyenne_heures": round(moyenne_heures, 2)
     }
-
-def get_today_attendances(db: Session):
-    """Récupère tous les pointages du jour."""
-    today = datetime.now().date()
-    return db.query(Attendance).filter(Attendance.date == today).all()

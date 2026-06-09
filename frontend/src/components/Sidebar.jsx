@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LayoutDashboard, Users, ScanLine, Clock } from 'lucide-react';
+import { LayoutDashboard, Users, ScanLine, Clock, ClipboardList } from 'lucide-react';
 
 const Sidebar = () => {
     const { user } = useAuth();
@@ -10,6 +10,7 @@ const Sidebar = () => {
         { path: '/dashboard', name: 'Tableau de bord', icon: LayoutDashboard, roles: ['admin', 'gestionnaire'] },
         { path: '/employees', name: 'Employés', icon: Users, roles: ['admin'] },
         { path: '/scanner', name: 'Scanner QR', icon: ScanLine, roles: ['admin', 'gestionnaire'] },
+        { path: '/history', name: 'Historique', icon: ClipboardList, roles: ['admin', 'gestionnaire'] },
     ];
 
     return (
